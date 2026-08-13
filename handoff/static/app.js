@@ -14,8 +14,13 @@
   function nowTime() { return new Date().toLocaleTimeString("zh-CN", { hour12: false }); }
   function nowISO() { return new Date().toISOString().slice(0, 19).replace("T", " "); }
 
+  const APP_BASE = window.location.pathname === "/"
+    ? ""
+    : window.location.pathname.replace(/\/+$/, "");
+  const appUrl = path => `${APP_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+
   async function api(url, opts = {}) {
-    const r = await fetch(url, { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } });
+    const r = await fetch(appUrl(url), { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } });
     const ct = r.headers.get("content-type") || "";
     const body = ct.includes("json") ? await r.json() : null;
     if (!r.ok) throw new Error(body?.error || `HTTP ${r.status}`);
@@ -400,7 +405,7 @@
     mainLog.clear();
     $("singleResultCard").hidden = true;
     setStatus("running", "提链中");
-    const src = new EventSource(`/api/jobs/${jobId}/events`);
+    const src = new EventSource(appUrl(`/api/jobs/${jobId}/events`));
     state.es = src;
     const labels = { queued:"排队中", running:"提链中", stopping:"停止中", success:"成功", failed:"失败", cancelled:"已停止" };
     src.addEventListener("state", e => {
@@ -648,7 +653,7 @@
     const term = ["success","failed","cancelled","partial"].includes(b.status);
     $("batchCancel").disabled = term;
     $("batchRetry").disabled = !(b.retryable_count > 0 && term);
-    $("batchDl").href = `/api/batches/${b.id}/results.csv`;
+    $("batchDl").href = appUrl(`/api/batches/${b.id}/results.csv`);
     $("batchDl").setAttribute("aria-disabled", "false");
     renderBatchJobs(b);
   }

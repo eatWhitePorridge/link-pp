@@ -264,6 +264,67 @@ def test_gateway_creates_country_aligned_zero_oaics_checkout(monkeypatch):
     artifact.close_transport()
 
 
+def test_preflight_rebuilds_session_once_after_transient_network_failure(monkeypatch):
+    first_http = object()
+    second_http = object()
+    preflight_calls = []
+    renew_calls = []
+    logs = []
+
+    def preflight(**kwargs):
+        preflight_calls.append(kwargs["http"])
+        if kwargs["http"] is first_http:
+            raise stripe.CheckoutPreflightError(
+                "temporary proxy interruption",
+                code="PROXY_UNAVAILABLE",
+            )
+
+    def renew(current):
+        renew_calls.append(current)
+        return second_http
+
+    monkeypatch.setattr(gateway_module, "preflight_checkout_route", preflight)
+
+    result = gateway_module.preflight_checkout_route_with_retry(
+        http=first_http,
+        proxy_country="BR",
+        access_token="test-at",
+        device_id="device-test",
+        log=logs.append,
+        renew_http=renew,
+    )
+
+    assert result is second_http
+    assert preflight_calls == [first_http, second_http]
+    assert renew_calls == [first_http]
+    assert logs == ["预检网络中断，重建代理连接后重试一次"]
+
+
+def test_preflight_does_not_retry_country_mismatch(monkeypatch):
+    renew_calls = []
+
+    def preflight(**_kwargs):
+        raise stripe.CheckoutPreflightError(
+            "wrong country",
+            code="PROXY_COUNTRY_MISMATCH",
+        )
+
+    monkeypatch.setattr(gateway_module, "preflight_checkout_route", preflight)
+
+    with pytest.raises(stripe.CheckoutPreflightError) as captured:
+        gateway_module.preflight_checkout_route_with_retry(
+            http=object(),
+            proxy_country="BR",
+            access_token="test-at",
+            device_id="device-test",
+            log=lambda _message: None,
+            renew_http=lambda current: renew_calls.append(current),
+        )
+
+    assert captured.value.code == "PROXY_COUNTRY_MISMATCH"
+    assert renew_calls == []
+
+
 def test_gateway_rejects_hosted_checkout_before_stripe_init(monkeypatch):
     class Http:
         def close(self):

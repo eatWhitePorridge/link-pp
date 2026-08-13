@@ -88,6 +88,39 @@ def preflight_checkout_route(
     log("ChatGPT /me 账号与连接预检通过")
 
 
+def preflight_checkout_route_with_retry(
+    *,
+    http,
+    proxy_country: str,
+    access_token: str,
+    device_id: str,
+    log: LogFn,
+    renew_http: Callable[[Any], Any],
+):
+    try:
+        preflight_checkout_route(
+            http=http,
+            proxy_country=proxy_country,
+            access_token=access_token,
+            device_id=device_id,
+            log=log,
+        )
+        return http
+    except stripe.CheckoutPreflightError as exc:
+        if exc.code not in {"PROXY_UNAVAILABLE", "CHATGPT_CONNECTION_FAILED"}:
+            raise
+        log("预检网络中断，重建代理连接后重试一次")
+        replacement = renew_http(http)
+        preflight_checkout_route(
+            http=replacement,
+            proxy_country=proxy_country,
+            access_token=access_token,
+            device_id=device_id,
+            log=log,
+        )
+        return replacement
+
+
 def _ba_from_url(url: str) -> str:
     try:
         token = (parse_qs(urlsplit(url).query).get("ba_token") or [""])[0]
@@ -187,12 +220,13 @@ class LiveProtocolGateway:
             return http
 
         try:
-            preflight_checkout_route(
+            http = preflight_checkout_route_with_retry(
                 http=http,
                 proxy_country=proxy_country.code,
                 access_token=access_token,
                 device_id=device_id,
                 log=log,
+                renew_http=renew_checkout_http,
             )
             session_id, error = stripe.create_chatgpt_order_with_retry(
                 http,

@@ -9,7 +9,7 @@ services:
     environment:
       HANDOFF_DIAGNOSTIC_DIR: /data/diagnostics
     ports:
-      - "5572:5572"
+      - "127.0.0.1:5572:5572"
     volumes:
       - paypal-dual-country-data:/data
     read_only: true
